@@ -1,0 +1,177 @@
+#include <Arduino.h>
+#include "BluetoothSerial.h"
+
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error Bluetooth is not enabled! Please run `make menuconfig` to enable it natively.
+#endif
+
+BluetoothSerial SerialBT;
+
+String inputString = "";
+bool stringComplete = false;
+
+// --- NEW DIRECT PWM VEHICLE DRIVE PIN ASSIGNMENTS ---
+const int pinLF = 4;   // Hardware Board Pin D4  (GPIO 4)  -> Left Front Output
+const int pinRF = 5;   // Hardware Board Pin D5  (GPIO 5)  -> Right Front Output
+const int pinLB = 18;  // Hardware Board Pin D18 (GPIO 18) -> Left Back Output
+const int pinRB = 19;  // Hardware Board Pin D19 (GPIO 19) -> Right Back Output
+
+// --- ACCESSORY LOGIC PIN ASSIGNMENTS ---
+const int pinLED      = 2;   
+const int pinHatch    = 25;  
+const int pinBrush    = 26;  
+const int pinSpray    = 27;  
+const int pinRigUp    = 32;  
+const int pinRigDn    = 33;  
+const int pinHorn     = 13;  
+
+// --- INTERNAL TIMER SEPARATIONS (For v3.x Engine Core Compatibility) ---
+const int chLF = 0; 
+const int chRF = 1; 
+const int chLB = 2; 
+const int chRB = 3; 
+
+const int freq  = 5000;  // 5 kHz Frequency response 
+const int res   = 8;     // 8-Bit resolution scaling (0-255)
+
+void setup() {
+  Serial.begin(115200);   
+  
+  // Launch Bluetooth classic network adapter broadcast profile
+  SerialBT.begin("StreetWatch Neo"); 
+  
+  // Define accessory parameters as outputs
+  pinMode(pinLED, OUTPUT);
+  pinMode(pinHatch, OUTPUT);
+  pinMode(pinBrush, OUTPUT);
+  pinMode(pinSpray, OUTPUT);
+  pinMode(pinRigUp, OUTPUT);
+  pinMode(pinRigDn, OUTPUT);
+  pinMode(pinHorn, OUTPUT);
+
+  // --- LEDC MULTI-CHANNEL SYSTEM ASSIGNMENTS ---
+  ledcAttachChannel(pinLF, freq, res, chLF);
+  ledcAttachChannel(pinRF, freq, res, chRF);
+  ledcAttachChannel(pinLB, freq, res, chLB);
+  ledcAttachChannel(pinRB, freq, res, chRB);
+  
+  // Safety default routine 
+  stopVehicle();
+  
+  Serial.println("==============================================");
+  Serial.println(" System Core Initialized Successfully (No RX2/TX2)");
+  Serial.println(" Broadcast Identifier: [ StreetWatch Neo ]");
+  Serial.println("==============================================");
+}
+
+void loop() {
+  while (SerialBT.available()) {
+    char inChar = (char)SerialBT.read();
+    if (inChar == '\n') {
+      stringComplete = true;
+    } else if (inChar != '\r') {
+      inputString += inChar;
+    }
+  }
+
+  if (stringComplete) {
+    inputString.trim();
+    Serial.print("Data Processed: ");
+    Serial.println(inputString);
+
+    // 1. DIRECTION PAD & SLIDER SPEED INTEGRATED ROUTINE
+    if (inputString.startsWith("DIR:")) {
+      int commaIndex = inputString.indexOf(',');
+      if (commaIndex != -1) {
+        String direction = inputString.substring(4, commaIndex);
+        int targetSpeed = inputString.substring(commaIndex + 1).toInt();
+        executeDrive(direction, targetSpeed);
+      }
+    }
+    // 2. TOGGLE MODULE SELECTIONS
+    else if (inputString == "LED:1")       digitalWrite(pinLED, HIGH);
+    else if (inputString == "LED:0")       digitalWrite(pinLED, LOW);
+    
+    else if (inputString == "GARBAGE:1")   digitalWrite(pinHatch, HIGH);
+    else if (inputString == "GARBAGE:0")   digitalWrite(pinHatch, LOW);
+    
+    else if (inputString == "CLEAN:1")     digitalWrite(pinBrush, HIGH);
+    else if (inputString == "CLEAN:0")     digitalWrite(pinBrush, LOW);
+    
+    else if (inputString == "WATER:1")     digitalWrite(pinSpray, HIGH);
+    else if (inputString == "WATER:0")     digitalWrite(pinSpray, LOW);
+    
+    else if (inputString == "W_CLEAN:1") {
+      digitalWrite(pinBrush, HIGH);
+      digitalWrite(pinSpray, HIGH);
+    }
+    else if (inputString == "W_CLEAN:0") {
+      digitalWrite(pinBrush, LOW);
+      digitalWrite(pinSpray, LOW);
+    }
+
+    // 3. MOMENTARY SWITCH ACTIONS
+    else if (inputString == "BRUSH:UP")    digitalWrite(pinRigUp, HIGH);
+    else if (inputString == "BRUSH:DN")    digitalWrite(pinRigDn, HIGH);
+    else if (inputString == "BRUSH:OFF") {
+      digitalWrite(pinRigUp, LOW);
+      digitalWrite(pinRigDn, LOW);
+    }
+    
+    else if (inputString == "HRN:1")       digitalWrite(pinHorn, HIGH);
+    else if (inputString == "HRN:0")       digitalWrite(pinHorn, LOW);
+
+    inputString = "";
+    stringComplete = false;
+  }
+}
+
+// --- MOTION GENERATION LAYER ---
+void executeDrive(String dir, int speed) {
+  if (dir == "F") { 
+    // Front works 2 pins (D4 + D5)
+    ledcWrite(pinLF, speed); ledcWrite(pinRF, speed);
+    ledcWrite(pinLB, 0);     ledcWrite(pinRB, 0);
+  } 
+  else if (dir == "B") { 
+    // Back works 2 pins (D18 + D19)
+    ledcWrite(pinLF, 0);     ledcWrite(pinRF, 0);
+    ledcWrite(pinLB, speed); ledcWrite(pinRB, speed);
+  } 
+  else if (dir == "L") { 
+    // Left works 1 from front (RF) and 1 from back (LB)
+    ledcWrite(pinLF, 0);     ledcWrite(pinRF, speed);
+    ledcWrite(pinLB, speed); ledcWrite(pinRB, 0);
+  } 
+  else if (dir == "R") { 
+    // Right uses other 1 from front (LF) and back (RB)
+    ledcWrite(pinLF, speed); ledcWrite(pinRF, 0);
+    ledcWrite(pinLB, 0);     ledcWrite(pinRB, speed);
+  }
+  else if (dir == "FL") { 
+    ledcWrite(pinLF, speed / 3); ledcWrite(pinRF, speed);
+    ledcWrite(pinLB, speed / 2); ledcWrite(pinRB, 0);
+  }
+  else if (dir == "FR") { 
+    ledcWrite(pinLF, speed);     ledcWrite(pinRF, speed / 3);
+    ledcWrite(pinLB, 0);         ledcWrite(pinRB, speed / 2);
+  }
+  else if (dir == "BL") { 
+    ledcWrite(pinLF, 0);         ledcWrite(pinRF, speed / 2);
+    ledcWrite(pinLB, speed / 3); ledcWrite(pinRB, speed);
+  }
+  else if (dir == "BR") { 
+    ledcWrite(pinLF, speed / 2); ledcWrite(pinRF, 0);
+    ledcWrite(pinLB, speed);     ledcWrite(pinRB, speed / 3);
+  }
+  else if (dir == "S") { 
+    stopVehicle();
+  }
+}
+
+void stopVehicle() {
+  ledcWrite(pinLF, 0);
+  ledcWrite(pinRF, 0);
+  ledcWrite(pinLB, 0);
+  ledcWrite(pinRB, 0);
+}
