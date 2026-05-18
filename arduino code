@@ -1,0 +1,171 @@
+#include <SoftwareSerial.h>
+
+// Set up Software Serial for the external HC-05/HC-06 Bluetooth module
+// Arduino Pin 11 connects to HC-05 TXD
+// Arduino Pin 12 connects to HC-05 RXD (Use a voltage divider here if possible!)
+SoftwareSerial Bluetooth(11, 12); 
+
+String inputString = "";
+bool stringComplete = false;
+
+// --- DIRECT PWM DRIVING PINS ---
+const int pinLF = 3;  // Uno PWM Pin 3 -> Left Front Wheel
+const int pinRF = 5;  // Uno PWM Pin 5 -> Right Front Wheel
+const int pinLB = 6;  // Uno PWM Pin 6 -> Left Back Wheel
+const int pinRB = 9;  // Uno PWM Pin 9 -> Right Back Wheel
+
+// --- DIGITAL ACCESSORY SWITCHES ---
+const int pinLED    = 10; // Headlights
+const int pinHatch  = 8;  // Collector Hatch
+const int pinBrush  = 7;  // Sweeper Roller Motor
+const int pinSpray  = 4;  // Fluid Spray Pump
+const int pinRigUp  = 13; // Lift Mechanics Up
+const int pinRigDn  = A1; // Lift Mechanics Down (Using Analog A1 as Digital Output)
+const int pinHorn   = A0; // Horn Buzzer Device (Using Analog A0 as Digital Output)
+
+void setup() {
+  // Initialize standard hardware USB serial for computer diagnostics
+  Serial.begin(9600);
+  
+  // Initialize Bluetooth module transmission rate (Standard default factory speed is 9600)
+  Bluetooth.begin(9600);
+  
+  // Configure Driving Pins as Standard Outputs
+  pinMode(pinLF, OUTPUT);
+  pinMode(pinRF, OUTPUT);
+  pinMode(pinLB, OUTPUT);
+  pinMode(pinRB, OUTPUT);
+
+  // Configure Accessories as Standard Outputs
+  pinMode(pinLED, OUTPUT);
+  pinMode(pinHatch, OUTPUT);
+  pinMode(pinBrush, OUTPUT);
+  pinMode(pinSpray, OUTPUT);
+  pinMode(pinRigUp, OUTPUT);
+  pinMode(pinRigDn, OUTPUT);
+  pinMode(pinHorn, OUTPUT);
+
+  // Bring vehicle to a safe halt at startup
+  stopVehicle();
+  
+  Serial.println(F("=============================================="));
+  Serial.println(F(" Arduino Uno System Online (StreetWatch Neo) "));
+  Serial.println(F(" Connection: Use HC-05/06 on Pins 11 and 12   "));
+  Serial.println(F("=============================================="));
+}
+
+void loop() {
+  // Gather incoming characters over the air from the external Bluetooth module
+  while (Bluetooth.available()) {
+    char inChar = (char)Bluetooth.read();
+    if (inChar == '\n') {
+      stringComplete = true;
+    } else if (inChar != '\r') {
+      inputString += inChar;
+    }
+  }
+
+  // Handle incoming data packet when transmission parsing confirms string complete
+  if (stringComplete) {
+    inputString.trim();
+    Serial.print(F("Data Handled: "));
+    Serial.println(inputString);
+
+    // 1. INTEGRATED STEERING AND SLIDER DATA INTERPRETER
+    if (inputString.startsWith("DIR:")) {
+      int commaIndex = inputString.indexOf(',');
+      if (commaIndex != -1) {
+        String direction = inputString.substring(4, commaIndex);
+        int targetSpeed = inputString.substring(commaIndex + 1).toInt();
+        executeDrive(direction, targetSpeed);
+      }
+    }
+    // 2. DISCRETE RELAY ACTION TOGGLES
+    else if (inputString == "LED:1")       digitalWrite(pinLED, HIGH);
+    else if (inputString == "LED:0")       digitalWrite(pinLED, LOW);
+    
+    else if (inputString == "GARBAGE:1")   digitalWrite(pinHatch, HIGH);
+    else if (inputString == "GARBAGE:0")   digitalWrite(pinHatch, LOW);
+    
+    else if (inputString == "CLEAN:1")     digitalWrite(pinBrush, HIGH);
+    else if (inputString == "CLEAN:0")     digitalWrite(pinBrush, LOW);
+    
+    else if (inputString == "WATER:1")     digitalWrite(pinSpray, HIGH);
+    else if (inputString == "WATER:0")     digitalWrite(pinSpray, LOW);
+    
+    else if (inputString == "W_CLEAN:1") {
+      digitalWrite(pinBrush, HIGH);
+      digitalWrite(pinSpray, HIGH);
+    }
+    else if (inputString == "W_CLEAN:0") {
+      digitalWrite(pinBrush, LOW);
+      digitalWrite(pinSpray, LOW);
+    }
+
+    // 3. RESPONSIVE MOMENTARY HOLD MECHANICS
+    else if (inputString == "BRUSH:UP")    digitalWrite(pinRigUp, HIGH);
+    else if (inputString == "BRUSH:DN")    digitalWrite(pinRigDn, HIGH);
+    else if (inputString == "BRUSH:OFF") {
+      digitalWrite(pinRigUp, LOW);
+      digitalWrite(pinRigDn, LOW);
+    }
+    
+    else if (inputString == "HRN:1")       digitalWrite(pinHorn, HIGH);
+    else if (inputString == "HRN:0")       digitalWrite(pinHorn, LOW);
+
+    // Recycle text buffers
+    inputString = "";
+    stringComplete = false;
+  }
+}
+
+// --- DIRECT PWM DRIVE ENGINE ROUTINE ---
+void executeDrive(String dir, int speed) {
+  if (dir == "F") { 
+    // Front works 2 pins (LF and RF) using direct analog write values
+    analogWrite(pinLF, speed); analogWrite(pinRF, speed);
+    analogWrite(pinLB, 0);     analogWrite(pinRB, 0);
+  } 
+  else if (dir == "B") { 
+    // Back works 2 pins (LB and RB)
+    analogWrite(pinLF, 0);     analogWrite(pinRF, 0);
+    analogWrite(pinLB, speed); analogWrite(pinRB, speed);
+  } 
+  else if (dir == "L") { 
+    // Left works 1 from front (RF) and 1 from back (LB)
+    analogWrite(pinLF, 0);     analogWrite(pinRF, speed);
+    analogWrite(pinLB, speed); analogWrite(pinRB, 0);
+  } 
+  else if (dir == "R") { 
+    // Right uses the other 1 from front (LF) and back (RB)
+    analogWrite(pinLF, speed); analogWrite(pinRF, 0);
+    analogWrite(pinLB, 0);     analogWrite(pinRB, speed);
+  }
+  else if (dir == "FL") { 
+    analogWrite(pinLF, speed / 3); analogWrite(pinRF, speed);
+    analogWrite(pinLB, speed / 2); analogWrite(pinRB, 0);
+  }
+  else if (dir == "FR") { 
+    analogWrite(pinLF, speed);     analogWrite(pinRF, speed / 3);
+    analogWrite(pinLB, 0);         analogWrite(pinRB, speed / 2);
+  }
+  else if (dir == "BL") { 
+    analogWrite(pinLF, 0);         analogWrite(pinRF, speed / 2);
+    analogWrite(pinLB, speed / 3); analogWrite(pinRB, speed);
+  }
+  else if (dir == "BR") { 
+    analogWrite(pinLF, speed / 2); analogWrite(pinRF, 0);
+    analogWrite(pinLB, speed);     analogWrite(pinRB, speed / 3);
+  }
+  else if (dir == "S") { 
+    stopVehicle();
+  }
+}
+
+void stopVehicle() {
+  // Pull all active PWM driving signals down to ground level
+  analogWrite(pinLF, 0);
+  analogWrite(pinRF, 0);
+  analogWrite(pinLB, 0);
+  analogWrite(pinRB, 0);
+}
