@@ -1,42 +1,32 @@
-#include <SoftwareSerial.h>
-
-// Set up Software Serial for the external HC-05/HC-06 Bluetooth module
-// Arduino Pin 11 connects to HC-05 TXD
-// Arduino Pin 12 connects to HC-05 RXD (Use a voltage divider here if possible!)
-SoftwareSerial Bluetooth(11, 12); 
-
 String inputString = "";
 bool stringComplete = false;
 
-// --- DIRECT PWM DRIVING PINS ---
-const int pinLF = 3;  // Uno PWM Pin 3 -> Left Front Wheel
-const int pinRF = 5;  // Uno PWM Pin 5 -> Right Front Wheel
-const int pinLB = 6;  // Uno PWM Pin 6 -> Left Back Wheel
-const int pinRB = 9;  // Uno PWM Pin 9 -> Right Back Wheel
+// --- DIRECT PWM MOTOR PIN CONFIGURATIONS ---
+const int pinLF = 3;  // Uno Hardware PWM Pin 3 -> Left Front Wheel
+const int pinRF = 5;  // Uno Hardware PWM Pin 5 -> Right Front Wheel
+const int pinLB = 6;  // Uno Hardware PWM Pin 6 -> Left Back Wheel
+const int pinRB = 9;  // Uno Hardware PWM Pin 9 -> Right Back Wheel
 
-// --- DIGITAL ACCESSORY SWITCHES ---
-const int pinLED    = 10; // Headlights
-const int pinHatch  = 8;  // Collector Hatch
-const int pinBrush  = 7;  // Sweeper Roller Motor
-const int pinSpray  = 4;  // Fluid Spray Pump
-const int pinRigUp  = 13; // Lift Mechanics Up
-const int pinRigDn  = A1; // Lift Mechanics Down (Using Analog A1 as Digital Output)
-const int pinHorn   = A0; // Horn Buzzer Device (Using Analog A0 as Digital Output)
+// --- DIGITAL ALL-VALIDATED ACCESSORY SWITCHES ---
+const int pinLED    = 2;   // Headlights (Digital Pin 2)
+const int pinHatch  = 10;  // Collector Hatch (Digital Pin 10)
+const int pinBrush  = 11;  // Sweeper Roller Motor (Digital Pin 11)
+const int pinSpray  = 12;  // Fluid Spray Pump (Digital Pin 12)
+const int pinRigUp  = 4;   // Lift Mechanics Up (Digital Pin 4)
+const int pinRigDn  = 8;   // Lift Mechanics Down (Digital Pin 8)
+const int pinHorn   = 7;   // Horn Buzzer Device (Digital Pin 7)
 
 void setup() {
-  // Initialize standard hardware USB serial for computer diagnostics
+  // Initialize Hardware Serial on Pins 0 and 1 for the Bluetooth Module
   Serial.begin(9600);
   
-  // Initialize Bluetooth module transmission rate (Standard default factory speed is 9600)
-  Bluetooth.begin(9600);
-  
-  // Configure Driving Pins as Standard Outputs
+  // Configure Driving Pins as Outputs
   pinMode(pinLF, OUTPUT);
   pinMode(pinRF, OUTPUT);
   pinMode(pinLB, OUTPUT);
   pinMode(pinRB, OUTPUT);
 
-  // Configure Accessories as Standard Outputs
+  // Configure Accessory Pins as Outputs
   pinMode(pinLED, OUTPUT);
   pinMode(pinHatch, OUTPUT);
   pinMode(pinBrush, OUTPUT);
@@ -45,19 +35,14 @@ void setup() {
   pinMode(pinRigDn, OUTPUT);
   pinMode(pinHorn, OUTPUT);
 
-  // Bring vehicle to a safe halt at startup
+  // Instantly lock wheels down to neutral safety potential at boot up
   stopVehicle();
-  
-  Serial.println(F("=============================================="));
-  Serial.println(F(" Arduino Uno System Online (StreetWatch Neo) "));
-  Serial.println(F(" Connection: Use HC-05/06 on Pins 11 and 12   "));
-  Serial.println(F("=============================================="));
 }
 
 void loop() {
-  // Gather incoming characters over the air from the external Bluetooth module
-  while (Bluetooth.available()) {
-    char inChar = (char)Bluetooth.read();
+  // Read incoming streaming bytes directly from Hardware Pins 0 & 1
+  while (Serial.available()) {
+    char inChar = (char)Serial.read();
     if (inChar == '\n') {
       stringComplete = true;
     } else if (inChar != '\r') {
@@ -65,13 +50,11 @@ void loop() {
     }
   }
 
-  // Handle incoming data packet when transmission parsing confirms string complete
+  // Parse incoming data packets when transmission parsing confirms complete string
   if (stringComplete) {
     inputString.trim();
-    Serial.print(F("Data Handled: "));
-    Serial.println(inputString);
 
-    // 1. INTEGRATED STEERING AND SLIDER DATA INTERPRETER
+    // 1. D-PAD STEERING AND SEEKBAR SLIDER SPEED INTERPRETER
     if (inputString.startsWith("DIR:")) {
       int commaIndex = inputString.indexOf(',');
       if (commaIndex != -1) {
@@ -80,7 +63,7 @@ void loop() {
         executeDrive(direction, targetSpeed);
       }
     }
-    // 2. DISCRETE RELAY ACTION TOGGLES
+    // 2. STABLE SWITCHING SELECTIONS (TOGGLES)
     else if (inputString == "LED:1")       digitalWrite(pinLED, HIGH);
     else if (inputString == "LED:0")       digitalWrite(pinLED, LOW);
     
@@ -102,7 +85,7 @@ void loop() {
       digitalWrite(pinSpray, LOW);
     }
 
-    // 3. RESPONSIVE MOMENTARY HOLD MECHANICS
+    // 3. SECURE MOMENTARY HOLD MECHANICS
     else if (inputString == "BRUSH:UP")    digitalWrite(pinRigUp, HIGH);
     else if (inputString == "BRUSH:DN")    digitalWrite(pinRigDn, HIGH);
     else if (inputString == "BRUSH:OFF") {
@@ -113,13 +96,13 @@ void loop() {
     else if (inputString == "HRN:1")       digitalWrite(pinHorn, HIGH);
     else if (inputString == "HRN:0")       digitalWrite(pinHorn, LOW);
 
-    // Recycle text buffers
+    // Reset loop text buffer limits
     inputString = "";
     stringComplete = false;
   }
 }
 
-// --- DIRECT PWM DRIVE ENGINE ROUTINE ---
+// --- CORE DIRECT PWM SPEED ENGINE ---
 void executeDrive(String dir, int speed) {
   if (dir == "F") { 
     // Front works 2 pins (LF and RF) using direct analog write values
@@ -163,7 +146,7 @@ void executeDrive(String dir, int speed) {
 }
 
 void stopVehicle() {
-  // Pull all active PWM driving signals down to ground level
+  // Safe default: Pull all active drive pins down to 0V instantly
   analogWrite(pinLF, 0);
   analogWrite(pinRF, 0);
   analogWrite(pinLB, 0);
